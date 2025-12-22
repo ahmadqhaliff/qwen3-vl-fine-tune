@@ -199,6 +199,12 @@ def main() -> None:
     ap.add_argument("--save-steps", type=int, default=200)
     ap.add_argument("--logging-steps", type=int, default=10)
     ap.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="PyTorch dataloader workers for image preprocessing (try 4).",
+    )
+    ap.add_argument(
         "--no-grad-checkpointing",
         action="store_true",
         help="Disable gradient checkpointing (faster if VRAM allows).",
@@ -300,6 +306,8 @@ def main() -> None:
         "per_device_eval_batch_size": 1,
         "gradient_accumulation_steps": args.grad_accum,
         "fp16": True,
+        "dataloader_num_workers": args.num_workers,
+        "dataloader_pin_memory": True,
         "logging_steps": args.logging_steps,
         "save_steps": args.save_steps,
         "save_total_limit": 2,

@@ -97,6 +97,7 @@ If it "moves" but is very slow:
 - The first 1-2 steps are often slow (kernel compile / first-batch preprocessing).
 - To speed up wall time, reduce compute: `--image-max-side 1024` and/or `--max-len 2048`.
 - If you have VRAM headroom (A6000 48GB), you can try disabling gradient checkpointing (faster): add `--no-grad-checkpointing`.
+- If CPU is pegged while GPU is underutilized, increase dataloader parallelism: add `--num-workers 4`.
 
 ## 3) Serve (baseline)
 
