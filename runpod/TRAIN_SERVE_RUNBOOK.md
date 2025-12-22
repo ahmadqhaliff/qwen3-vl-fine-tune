@@ -4,6 +4,11 @@ This runbook assumes:
 - You use a **RunPod A6000 48GB** pod
 - You mount your repo into the pod (e.g. `/workspace/qwen3-vl-fine-tune`)
 
+## Persistence note (why your data disappeared)
+On many RunPod templates, anything under `/root` is on the container/root filesystem and can be **ephemeral** (lost when the pod is stopped/restarted or moved).
+
+To keep datasets, checkpoints, and logs, store them on the attached volume, typically mounted at `/workspace`.
+
 ## 0) Upload your dataset to the pod
 The repo intentionally does **not** commit large dataset artifacts (images, zips, JSONL splits).
 After `git clone`, you must upload them to the pod.
@@ -21,16 +26,35 @@ $POD_HOST = "38.147.83.18"
 $PORT = 49194
 
 # create folders on the pod
-ssh -i $KEY -p $PORT root@$POD_HOST "mkdir -p /root/qwen3-vl-fine-tune/data/splits /root/qwen3-vl-fine-tune/data/raw"
+ssh -i $KEY -p $PORT root@$POD_HOST "mkdir -p /workspace/qwen3-vl-fine-tune/data/splits /workspace/qwen3-vl-fine-tune/data/raw"
 
 # upload splits
-scp -i $KEY -P $PORT -r .\data\splits root@${POD_HOST}:/root/qwen3-vl-fine-tune/data/
+scp -i $KEY -P $PORT -r .\data\splits root@${POD_HOST}:/workspace/qwen3-vl-fine-tune/data/
 
 # upload extracted images (can be large)
-scp -i $KEY -P $PORT -r .\data\raw root@${POD_HOST}:/root/qwen3-vl-fine-tune/data/
+scp -i $KEY -P $PORT -r .\data\raw root@${POD_HOST}:/workspace/qwen3-vl-fine-tune/data/
+```
+
+If you already cloned into `/root/qwen3-vl-fine-tune`, migrate once:
+
+```bash
+mkdir -p /workspace/qwen3-vl-fine-tune
+rsync -a --info=progress2 /root/qwen3-vl-fine-tune/ /workspace/qwen3-vl-fine-tune/
+mv /root/qwen3-vl-fine-tune /root/qwen3-vl-fine-tune.bak || true
+ln -s /workspace/qwen3-vl-fine-tune /root/qwen3-vl-fine-tune
 ```
 
 Alternative (recommended if you have the zips locally): upload `data/*.zip`, then extract/build on the pod.
+
+## 0.5) Install training dependencies
+Inside the pod, from the repo root:
+
+```bash
+python3 -m pip install -U pip
+python3 -m pip install -r runpod/train/requirements.txt
+```
+
+If you see an error mentioning `AutoVideoProcessor requires the Torchvision library`, it means `torchvision` is missing. It is included in `runpod/train/requirements.txt`.
 
 ## 1) Convert dataset splits into simple SFT JSONL
 Inside the repo:
@@ -60,6 +84,8 @@ python training/train_qwen3vl_qlora.py \
   --image-max-side 1536 \
   --max-len 4096
 ```
+
+Tip: for persistence, ensure you run this from `/workspace/qwen3-vl-fine-tune` so `outputs/` lands on the volume.
 
 If you OOM:
 - reduce `--image-max-side` (1024)
