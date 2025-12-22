@@ -72,6 +72,9 @@ class Collator:
         if isinstance(value, (bytes, bytearray, memoryview)):
             return ("", io.BytesIO(bytes(value)))
 
+        if isinstance(value, str) and not value.strip():
+            return ("", None)
+
         if isinstance(value, dict):
             if "bytes" in value and value["bytes"] is not None:
                 b = value["bytes"]
@@ -90,7 +93,8 @@ class Collator:
         else:
             p = Path(str(value))
 
-        if not str(p):
+        # Path("") becomes "."; treat as missing.
+        if str(p) in {"", "."}:
             return ("", None)
         if not p.is_absolute():
             p = (Path.cwd() / p).resolve()
@@ -198,6 +202,37 @@ def main() -> None:
             **({"validation": args.val} if args.val else {}),
         },
     )
+
+    # Drop records with missing/invalid images (common when train.jsonl was built without --skip-missing-images).
+    # We keep this in-script so training can proceed without rebuilding the dataset.
+    def _has_valid_image(ex: dict[str, Any]) -> bool:
+        v = ex.get("image")
+        if v is None:
+            return False
+        if isinstance(v, str) and not v.strip():
+            return False
+        try:
+            p = Path(str(v))
+        except Exception:
+            return False
+        if str(p) in {"", "."}:
+            return False
+        if not p.is_absolute():
+            p = (Path.cwd() / p).resolve()
+        return p.exists() and p.is_file()
+
+    before_train = len(dataset["train"])
+    dataset["train"] = dataset["train"].filter(_has_valid_image)
+    after_train = len(dataset["train"])
+    if after_train != before_train:
+        print(f"Filtered train records with missing images: {before_train} -> {after_train}")
+
+    if "validation" in dataset:
+        before_val = len(dataset["validation"])
+        dataset["validation"] = dataset["validation"].filter(_has_valid_image)
+        after_val = len(dataset["validation"])
+        if after_val != before_val:
+            print(f"Filtered val records with missing images: {before_val} -> {after_val}")
 
     processor = AutoProcessor.from_pretrained(args.model, trust_remote_code=True)
 
