@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Qwen-VL PDF extraction training record",
+  "type": "object",
+  "required": ["id", "messages"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "messages": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/message" }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "message": {
+      "type": "object",
+      "required": ["role", "content"],
+      "properties": {
+        "role": { "type": "string", "enum": ["system", "user", "assistant"] },
+        "content": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/content_item" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "content_item": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "enum": ["text", "image"] },
+        "text": { "type": "string" },
+        "image": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "text" } } },
+          "then": { "required": ["text" ] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "image" } } },
+          "then": { "required": ["image" ] }
+        }
+      ]
+    }
+  }
+}

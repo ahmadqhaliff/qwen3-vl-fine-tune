@@ -1,0 +1,10 @@
+# Keep shell scripts as LF even on Windows
+*.sh text eol=lf
+
+# Common text files normalize to LF in repo
+*.md text eol=lf
+*.txt text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

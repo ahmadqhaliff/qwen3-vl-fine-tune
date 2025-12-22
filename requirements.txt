@@ -1,0 +1,5 @@
+# Lightweight (data-prep only)
+# Keep this minimal; training/serving stacks will be added later.
+
+# Optional: uncomment if you want JSON Schema validation (stronger than the built-in checks)
+# jsonschema>=4.23.0

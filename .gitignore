@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.DS_Store
+
+# data artifacts
+/data/pdfs/
+/data/images/
+/data/ocr/
+
+# extracted images (large; derived from zips)
+/data/raw/
+
+# raw archives (store externally or via Git LFS)
+/data/*.zip
+
+# derived datasets/splits (rebuildable)
+/data/splits/
+/data/sft/
+*.jsonl

@@ -1,0 +1,226 @@
+"""Best-effort QLoRA SFT trainer for Qwen/Qwen3-VL-8B-Instruct.
+
+Notes:
+- Multimodal fine-tuning support depends on your installed `transformers` version.
+- This script is designed for a RunPod Linux GPU environment (A6000).
+- It expects a JSONL dataset with fields: {id, image, prompt, response}.
+
+If the model/processor class names change, the first thing to adjust is the
+`AutoModelForVision2Seq` import and the processor usage.
+"""
+
+import argparse
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import torch
+from datasets import load_dataset
+from PIL import Image
+from transformers import (
+    AutoModelForVision2Seq,
+    AutoProcessor,
+    TrainingArguments,
+    Trainer,
+)
+
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
+
+@dataclass
+class Batch:
+    input_ids: torch.Tensor
+    attention_mask: torch.Tensor
+    pixel_values: torch.Tensor | None
+    labels: torch.Tensor
+
+
+def build_chat_messages(prompt: str, response: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": prompt},
+            ],
+        },
+        {"role": "assistant", "content": [{"type": "text", "text": response}]},
+    ]
+
+
+class Collator:
+    def __init__(self, processor: Any, image_max_side: int, max_length: int):
+        self.processor = processor
+        self.image_max_side = image_max_side
+        self.max_length = max_length
+
+    def _load_image(self, path: str) -> Image.Image:
+        img = Image.open(path).convert("RGB")
+        # Resize by long-side while preserving aspect ratio
+        w, h = img.size
+        m = max(w, h)
+        if self.image_max_side and m > self.image_max_side:
+            scale = self.image_max_side / float(m)
+            nw, nh = int(w * scale), int(h * scale)
+            img = img.resize((nw, nh))
+        return img
+
+    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
+        images = [self._load_image(f["image"]) for f in features]
+        prompts = [str(f["prompt"]) for f in features]
+        responses = [str(f["response"]) for f in features]
+
+        # Build chat text using the model's chat template when available.
+        texts: list[str] = []
+        for p, r in zip(prompts, responses, strict=True):
+            msgs = build_chat_messages(p, r)
+            if hasattr(self.processor, "apply_chat_template"):
+                text = self.processor.apply_chat_template(
+                    msgs, tokenize=False, add_generation_prompt=False
+                )
+            else:
+                # fallback: concatenate
+                text = f"USER: {p}\nASSISTANT: {r}"
+            texts.append(text)
+
+        enc = self.processor(
+            text=texts,
+            images=images,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self.max_length,
+        )
+
+        input_ids = enc["input_ids"]
+        attention_mask = enc.get("attention_mask")
+        pixel_values = enc.get("pixel_values")
+
+        # Labels: standard causal LM labels; mask padding tokens.
+        labels = input_ids.clone()
+        pad_id = getattr(self.processor, "tokenizer", None)
+        pad_token_id = pad_id.pad_token_id if pad_id is not None else None
+        if pad_token_id is not None:
+            labels[input_ids == pad_token_id] = -100
+
+        batch: dict[str, torch.Tensor] = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+        }
+        if pixel_values is not None:
+            batch["pixel_values"] = pixel_values
+        return batch
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", default="Qwen/Qwen3-VL-8B-Instruct")
+    ap.add_argument("--train", required=True, help="path to train jsonl")
+    ap.add_argument("--val", default="", help="path to val jsonl")
+    ap.add_argument("--out", default="outputs/qwen3vl-8b-qlora")
+    ap.add_argument("--epochs", type=float, default=1.0)
+    ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--batch", type=int, default=1)
+    ap.add_argument("--grad-accum", type=int, default=16)
+    ap.add_argument("--max-len", type=int, default=4096)
+    ap.add_argument("--image-max-side", type=int, default=1536)
+    ap.add_argument("--lora-r", type=int, default=16)
+    ap.add_argument("--lora-alpha", type=int, default=32)
+    ap.add_argument("--lora-dropout", type=float, default=0.05)
+    ap.add_argument("--save-steps", type=int, default=200)
+    ap.add_argument("--logging-steps", type=int, default=10)
+    args = ap.parse_args()
+
+    os.makedirs(args.out, exist_ok=True)
+
+    dataset = load_dataset(
+        "json",
+        data_files={
+            "train": args.train,
+            **({"validation": args.val} if args.val else {}),
+        },
+    )
+
+    processor = AutoProcessor.from_pretrained(args.model, trust_remote_code=True)
+
+    # QLoRA: load 4-bit base
+    model = AutoModelForVision2Seq.from_pretrained(
+        args.model,
+        device_map="auto",
+        torch_dtype=torch.float16,
+        trust_remote_code=True,
+        load_in_4bit=True,
+    )
+
+    model = prepare_model_for_kbit_training(model)
+
+    lora = LoraConfig(
+        r=args.lora_r,
+        lora_alpha=args.lora_alpha,
+        lora_dropout=args.lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM",
+        target_modules=[
+            # Common projection names; adjust if needed for this model release
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "up_proj",
+            "down_proj",
+            "gate_proj",
+        ],
+    )
+
+    model = get_peft_model(model, lora)
+
+    collator = Collator(processor=processor, image_max_side=args.image_max_side, max_length=args.max_len)
+
+    targs = TrainingArguments(
+        output_dir=args.out,
+        num_train_epochs=args.epochs,
+        learning_rate=args.lr,
+        per_device_train_batch_size=args.batch,
+        per_device_eval_batch_size=1,
+        gradient_accumulation_steps=args.grad_accum,
+        fp16=True,
+        logging_steps=args.logging_steps,
+        save_steps=args.save_steps,
+        save_total_limit=2,
+        evaluation_strategy="steps" if args.val else "no",
+        eval_steps=args.save_steps if args.val else None,
+        report_to="none",
+        remove_unused_columns=False,
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=targs,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset.get("validation"),
+        data_collator=collator,
+    )
+
+    trainer.train()
+    trainer.save_model(args.out)
+
+    # Save a minimal adapter config artifact for serving
+    (Path(args.out) / "run_info.json").write_text(
+        json.dumps(
+            {
+                "base_model": args.model,
+                "method": "qlora",
+                "image_max_side": args.image_max_side,
+                "max_len": args.max_len,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+if __name__ == "__main__":
+    main()

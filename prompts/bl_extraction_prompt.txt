@@ -1,0 +1,45 @@
+From the image, extract the following details and return them as a JSON object with these exact keys (do not change or modify these keys):
+'consignee_name', 'bl_number', 'port_of_loading', 'port_of_discharge', 'vessel_name', 'detention_free_days', 'demurrage_free_days', 'combined_free_days', 'container_details', 'total_expected_containers'
+
+CRITICAL FREE DAYS EXTRACTION RULES:
+1. For statements like '14 DEMURRAGE AND 7 DETENTION FREE DAYS COMBINED':
+   - Extract demurrage_free_days = '14'
+   - Extract detention_free_days = '7'
+   - combined_free_days should be empty, as both values are separately specified
+2. Only use combined_free_days when a single number applies to both (e.g., '7 FREE DAYS COMBINED')
+3. Never put the same number in multiple fields unless explicitly stated
+4. If demurrage OR detention is explicitly mentioned but the other isn't, only populate the mentioned field
+
+CONSIGNEE RULES:
+- If consignee is listed as 'TO THE ORDER' or 'SAME AS NOTIFY PARTY', use the notify party's name instead
+- Otherwise, use the name listed under consignee
+- Use standard Malaysian company name format
+
+CONTAINER DETAILS RULES:
+- Identify all unique container numbers (e.g., MSKU1234567).
+- For each identified container number, determine its specific size (e.g., 20, 40) and type (e.g., GP, HC, RF).
+- This information might be found directly next to an individual container number (e.g., 'MSKU1234567/20GP','MSKU1234567/GP20') OR in a summary format (e.g., '10 x 20GP', meaning 10 containers of that size/type).
+- If a summary format like '10 x 20GP' is provided, and 10 distinct container numbers are also listed, associate the '20' size and 'GP' type with each of those 10 container numbers in the output.
+- If a mix of summaries is present (e.g., '2 x 20GP', '3 x 40HC') and a corresponding total number of containers are listed, assign sizes and types accordingly. Prioritize explicit individual assignments if present.
+- The final output for containers must be a list of objects under the 'container_details' key. Each object in this list must contain 'container_number', 'container_size', and 'container_type' keys.
+- If a container's size or type cannot be definitively determined from the image, use an empty string '' for those fields for that specific container object.
+
+TOTAL EXPECTED CONTAINERS RULES:
+- Extract the total number of containers expected based on summary statements like '10 x 20GP', '2 x 20GP + 3 x 40HC', etc. This should be an integer.
+- For example, if the document states '10 x 20GP', total_expected_containers should be 10.
+- If it states '2 x 20GP and 3 x 40HC', total_expected_containers should be 5 (2+3).
+- If no such summary statement is found, or if it's ambiguous, return null or do not include the key.
+
+FIELD DETAILS:
+- 'consignee_name': (text) The consignee's name. If it is 'to the order' or 'same as notify party', use the notify party's name.
+- 'bl_number': (text) The Bill of Lading (BL) number.
+- 'port_of_loading': (text) The port where the shipment was loaded.
+- 'port_of_discharge': (text) The port where the shipment will be unloaded. Must be one of: Port Klang, Pasir Gudang, Port Tanjung Pelepas, or Penang.
+- 'vessel_name': (text) Name of the vessel and voyage number (e.g., GRACE BRIDGE 2306)
+- 'detention_free_days': (integer) Number of days for container free time detention. If there is none, return ''
+- 'demurrage_free_days': (integer) Number of days for container free time demurrage. If there is none, return ''
+- 'combined_free_days': (integer) Number of days for container free time combined. If there is none, return ''
+- 'container_details': (list of objects) Each object includes 'container_number' (text), 'container_size' (text), 'container_type' (text).
+- 'total_expected_containers': (integer) Total count from summary statements. If not clearly stated, return null or omit.
+
+Return ONLY the JSON object. No additional text.
