@@ -10,6 +10,7 @@ If the model/processor class names change, the first thing to adjust is the
 """
 
 import argparse
+import io
 import inspect
 import json
 import os
@@ -57,8 +58,61 @@ class Collator:
         self.image_max_side = image_max_side
         self.max_length = max_length
 
-    def _load_image(self, path: str) -> Image.Image:
-        img = Image.open(path).convert("RGB")
+    def _coerce_image_source(self, value: Any) -> tuple[str, io.BytesIO | None]:
+        """Return (path, bytes_buf) where exactly one is set.
+
+        Supports:
+        - str / Path: filesystem path (relative paths resolved against CWD)
+        - dict: tries common keys like {path}, {image}, {file}, {bytes}
+        - bytes-like: in-memory image bytes
+        """
+        if value is None:
+            return ("", None)
+
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return ("", io.BytesIO(bytes(value)))
+
+        if isinstance(value, dict):
+            if "bytes" in value and value["bytes"] is not None:
+                b = value["bytes"]
+                if isinstance(b, str):
+                    # sometimes base64 strings show up; we don't decode here
+                    return (b, None)
+                if isinstance(b, (bytes, bytearray, memoryview)):
+                    return ("", io.BytesIO(bytes(b)))
+            for k in ("path", "image", "file", "filename"):
+                if k in value and value[k]:
+                    value = value[k]
+                    break
+
+        if isinstance(value, Path):
+            p = value
+        else:
+            p = Path(str(value))
+
+        if not str(p):
+            return ("", None)
+        if not p.is_absolute():
+            p = (Path.cwd() / p).resolve()
+        return (str(p), None)
+
+    def _load_image(self, image_value: Any) -> Image.Image:
+        path, buf = self._coerce_image_source(image_value)
+
+        # Always open from a file-like object to avoid PIL path-detection edge cases.
+        if buf is not None:
+            img = Image.open(buf)
+            img.load()
+        else:
+            if not path:
+                raise FileNotFoundError(
+                    "Empty image path in dataset record (did you include missing-image docs?)"
+                )
+            with open(path, "rb") as f:
+                img = Image.open(f)
+                img.load()
+
+        img = img.convert("RGB")
         # Resize by long-side while preserving aspect ratio
         w, h = img.size
         m = max(w, h)
@@ -69,7 +123,7 @@ class Collator:
         return img
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
-        images = [self._load_image(f["image"]) for f in features]
+        images = [self._load_image(f.get("image")) for f in features]
         prompts = [str(f["prompt"]) for f in features]
         responses = [str(f["response"]) for f in features]
 
