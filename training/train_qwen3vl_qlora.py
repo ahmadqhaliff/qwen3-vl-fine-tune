@@ -156,6 +156,8 @@ class Collator:
         input_ids = enc["input_ids"]
         attention_mask = enc.get("attention_mask")
         pixel_values = enc.get("pixel_values")
+        image_grid_thw = enc.get("image_grid_thw")
+        image_attention_mask = enc.get("image_attention_mask")
 
         # Labels: standard causal LM labels; mask padding tokens.
         labels = input_ids.clone()
@@ -171,6 +173,11 @@ class Collator:
         }
         if pixel_values is not None:
             batch["pixel_values"] = pixel_values
+        # Qwen3-VL expects grid metadata for positional embeddings.
+        if image_grid_thw is not None:
+            batch["image_grid_thw"] = image_grid_thw
+        if image_attention_mask is not None:
+            batch["image_attention_mask"] = image_attention_mask
         return batch
 
 
