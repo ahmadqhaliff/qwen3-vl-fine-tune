@@ -92,6 +92,12 @@ If you OOM:
 - reduce `--max-len`
 - increase `--grad-accum` and keep batch=1
 
+If it "moves" but is very slow:
+- With `--batch 1 --grad-accum 16`, each progress-bar step is **16 examples**, so minutes/step can be normal.
+- The first 1-2 steps are often slow (kernel compile / first-batch preprocessing).
+- To speed up wall time, reduce compute: `--image-max-side 1024` and/or `--max-len 2048`.
+- If you have VRAM headroom (A6000 48GB), you can try disabling gradient checkpointing (faster): add `--no-grad-checkpointing`.
+
 ## 3) Serve (baseline)
 
 Start with base model (no adapter) to confirm the endpoint works.

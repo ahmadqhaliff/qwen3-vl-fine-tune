@@ -198,6 +198,11 @@ def main() -> None:
     ap.add_argument("--lora-dropout", type=float, default=0.05)
     ap.add_argument("--save-steps", type=int, default=200)
     ap.add_argument("--logging-steps", type=int, default=10)
+    ap.add_argument(
+        "--no-grad-checkpointing",
+        action="store_true",
+        help="Disable gradient checkpointing (faster if VRAM allows).",
+    )
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -252,7 +257,15 @@ def main() -> None:
         load_in_4bit=True,
     )
 
-    model = prepare_model_for_kbit_training(model)
+    # PEFT helper often enables gradient checkpointing by default (saves VRAM, costs speed).
+    # On 48GB GPUs you may want to disable it for throughput.
+    prepare_sig = set(inspect.signature(prepare_model_for_kbit_training).parameters)
+    prepare_kwargs: dict[str, Any] = {}
+    if "use_gradient_checkpointing" in prepare_sig:
+        prepare_kwargs["use_gradient_checkpointing"] = (not args.no_grad_checkpointing)
+    model = prepare_model_for_kbit_training(model, **prepare_kwargs)
+    if args.no_grad_checkpointing and hasattr(model, "gradient_checkpointing_disable"):
+        model.gradient_checkpointing_disable()
 
     lora = LoraConfig(
         r=args.lora_r,
