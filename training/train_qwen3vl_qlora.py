@@ -10,6 +10,7 @@ If the model/processor class names change, the first thing to adjust is the
 """
 
 import argparse
+import inspect
 import json
 import os
 from dataclasses import dataclass
@@ -177,24 +178,36 @@ def main() -> None:
 
     model = get_peft_model(model, lora)
 
-    collator = Collator(processor=processor, image_max_side=args.image_max_side, max_length=args.max_len)
-
-    targs = TrainingArguments(
-        output_dir=args.out,
-        num_train_epochs=args.epochs,
-        learning_rate=args.lr,
-        per_device_train_batch_size=args.batch,
-        per_device_eval_batch_size=1,
-        gradient_accumulation_steps=args.grad_accum,
-        fp16=True,
-        logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
-        save_total_limit=2,
-        evaluation_strategy="steps" if args.val else "no",
-        eval_steps=args.save_steps if args.val else None,
-        report_to="none",
-        remove_unused_columns=False,
+    collator = Collator(
+        processor=processor, image_max_side=args.image_max_side, max_length=args.max_len
     )
+
+    # Transformers API compat: newer versions renamed `evaluation_strategy` -> `eval_strategy`.
+    targs_kwargs: dict[str, Any] = {
+        "output_dir": args.out,
+        "num_train_epochs": args.epochs,
+        "learning_rate": args.lr,
+        "per_device_train_batch_size": args.batch,
+        "per_device_eval_batch_size": 1,
+        "gradient_accumulation_steps": args.grad_accum,
+        "fp16": True,
+        "logging_steps": args.logging_steps,
+        "save_steps": args.save_steps,
+        "save_total_limit": 2,
+        "evaluation_strategy": "steps" if args.val else "no",
+        "eval_steps": args.save_steps if args.val else None,
+        "report_to": "none",
+        "remove_unused_columns": False,
+    }
+
+    sig_params = set(inspect.signature(TrainingArguments.__init__).parameters)
+    if "evaluation_strategy" not in sig_params and "eval_strategy" in sig_params:
+        targs_kwargs["eval_strategy"] = targs_kwargs.pop("evaluation_strategy")
+
+    # Drop any kwargs not supported by the installed Transformers version.
+    targs_kwargs = {k: v for k, v in targs_kwargs.items() if k in sig_params}
+
+    targs = TrainingArguments(**targs_kwargs)
 
     trainer = Trainer(
         model=model,
