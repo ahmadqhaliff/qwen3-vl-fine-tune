@@ -1,0 +1,26 @@
+# git / python
+.git
+**/.git
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+*.pyc
+
+# local data + outputs (huge)
+data
+data/**
+outputs
+outputs/**
+*.zip
+*.jsonl
+*.tgz
+
+# notebooks / cache
+.ipynb_checkpoints
+**/.ipynb_checkpoints
+.cache
+**/.cache
+
+# misc
+.DS_Store
