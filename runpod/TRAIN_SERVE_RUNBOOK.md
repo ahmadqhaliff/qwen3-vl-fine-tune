@@ -106,6 +106,33 @@ Then add LoRA adapter.
 
 We provide a container template in `runpod/serve/`.
 
+### vLLM (OpenAI-compatible HTTP)
+The `runpod/serve/` image runs `vllm.entrypoints.openai.api_server` (OpenAI-style endpoints).
+
+Key env vars:
+- `MODEL_ID` (default: `Qwen/Qwen3-VL-8B-Instruct`)
+- `PORT` (default: `8000`)
+- Adapter (pick one):
+  - `LORA_DIR` (mount a folder containing `adapter_model.safetensors` + `adapter_config.json`)
+  - `ADAPTER_TGZ_PATH` (mount a `.tgz` like `qwen3vl-8b-qlora-adapter.tgz`)
+  - `ADAPTER_URL` (https URL to that `.tgz`)
+
+Client tip (OpenRouter/OpenAI-style): point your client to your RunPod URL by changing only:
+- `base_url` -> `https://<your-endpoint>/v1`
+- `api_key` -> whatever you set (or dummy if you don't enforce)
+
+### Serverless note (LoRA)
+The RunPod "ready-to-deploy vLLM" tile may not expose a field to provide the LoRA adapter path/URL. If you can't set something equivalent to vLLM's `--lora-modules`, deploy a custom image instead.
+
+We include a GitHub Action that publishes the serve image to GHCR:
+- Workflow: `.github/workflows/build-serve-image.yml`
+- Image: `ghcr.io/<github_user_or_org>/qwen3-vl-serve:latest`
+
+Then in RunPod Serverless (Import from Docker Registry), set env vars:
+- `MODEL_ID=Qwen/Qwen3-VL-8B-Instruct`
+- `ADAPTER_URL=https://huggingface.co/<user>/<repo>/resolve/main/qwen3vl-8b-qlora-adapter.tgz`
+- `MAX_MODEL_LEN=4096`, `MAX_NUM_SEQS=8`, `GPU_MEMORY_UTILIZATION=0.90`
+
 ## 4) Quantize (optional)
 After you have a baseline working, test AWQ/GPTQ for serving.
 Quantization support depends on your chosen serving stack.
