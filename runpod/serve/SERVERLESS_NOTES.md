@@ -8,6 +8,17 @@ This repo includes a vLLM OpenAI-compatible server container in `runpod/serve/`.
 
 If your RunPod Serverless product supports exposing say `PORT=8000` as an HTTP endpoint for the container, then this image works directly.
 
+## Common failure: model becomes `/app/start.sh`
+If you see logs like:
+- `OSError: It looks like the config file at '/app/start.sh' is not a valid JSON file.`
+
+It means the vLLM server is trying to load the model from `/app/start.sh` (a script) instead of Hugging Face.
+
+Fix:
+- Leave **Container start command** empty (don’t override the image entrypoint)
+- Set `MODEL_ID=Qwen/Qwen3-VL-8B-Instruct`
+- In RunPod’s **Model** field, enter `Qwen/Qwen3-VL-8B-Instruct` (not `/app/start.sh`)
+
 ## Container
 - Dockerfile: `runpod/serve/Dockerfile`
 - Entrypoint: `runpod/serve/start.sh`

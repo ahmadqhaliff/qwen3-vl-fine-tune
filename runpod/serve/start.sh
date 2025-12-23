@@ -5,6 +5,13 @@ MODEL_ID="${MODEL_ID:-Qwen/Qwen3-VL-8B-Instruct}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 
+# Guard against misconfiguration where a platform overrides the container command
+# and accidentally sets MODEL_ID to a script path like /app/start.sh.
+if [[ "$MODEL_ID" == "/app/start.sh" ]] || [[ -f "$MODEL_ID" ]]; then
+  echo "[serve] WARN: MODEL_ID looks like a file path ($MODEL_ID). Falling back to Qwen/Qwen3-VL-8B-Instruct."
+  MODEL_ID="Qwen/Qwen3-VL-8B-Instruct"
+fi
+
 # Optional LoRA adapter directory (PEFT)
 LORA_DIR="${LORA_DIR:-}"
 
