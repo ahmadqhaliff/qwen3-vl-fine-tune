@@ -59,6 +59,11 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-8}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 
+# Optional: pass through extra vLLM flags without rebuilding the image.
+# Example:
+#   VLLM_EXTRA_ARGS="--enforce-eager --disable-log-stats"
+VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
+
 ARGS=(
   --model "$MODEL_ID"
   --host "$HOST"
@@ -73,6 +78,13 @@ ARGS=(
 if [[ -n "$LORA_DIR" ]]; then
   echo "[serve] Enabling LoRA from: ${LORA_DIR}"
   ARGS+=(--enable-lora --lora-modules "adapter=${LORA_DIR}")
+fi
+
+if [[ -n "$VLLM_EXTRA_ARGS" ]]; then
+  echo "[serve] Extra vLLM args: ${VLLM_EXTRA_ARGS}"
+  # Split on spaces (keep this simple; avoid quoting inside VLLM_EXTRA_ARGS)
+  read -r -a EXTRA_ARGS <<< "$VLLM_EXTRA_ARGS"
+  ARGS+=("${EXTRA_ARGS[@]}")
 fi
 
 python3 -m vllm.entrypoints.openai.api_server "${ARGS[@]}"

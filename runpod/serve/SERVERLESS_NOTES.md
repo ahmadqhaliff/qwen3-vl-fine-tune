@@ -66,5 +66,22 @@ The API paths are OpenAI-style:
 - `MAX_NUM_SEQS=8`
 - `GPU_MEMORY_UTILIZATION=0.90`
 
+## Latency tuning (practical)
+End-to-end latency is usually dominated by:
+- prompt length (your extraction instructions are long)
+- image size (base64 payload + vision encode)
+- cold starts (serverless)
+
+Recommended knobs for lower p90 on a single-user/low-concurrency endpoint:
+- Reduce prompt tokens: keep rules concise; avoid repeating examples; reuse the same prefix to benefit from prefix cache.
+- Reduce image size: resize to ~1024–1280px long side; JPEG quality ~80–90.
+- Reduce output tokens: set `max_tokens` to what you truly need (e.g. 400–900).
+- Prefer `MAX_NUM_SEQS=1` (or 2) for lowest single-request latency.
+- Prefer smaller `MAX_MODEL_LEN` if your prompt+output fits (e.g. 2048–3072).
+- Use streaming (`stream=true`) to reduce perceived latency.
+
+You can also pass extra vLLM flags via env:
+- `VLLM_EXTRA_ARGS=--disable-log-stats`
+
 Example serverless env (with HF-hosted adapter):
 - `ADAPTER_URL=https://huggingface.co/yourname/qwen3vl-8b-doc-extract-lora/resolve/main/qwen3vl-8b-qlora-adapter.tgz`
