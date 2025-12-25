@@ -30,3 +30,15 @@ When you’re ready, we’ll pick the exact toolchain (AWQ vs GPTQ vs FP8) based
 - The Azure GPU SKU you choose
 - The supported kernels in your container
 - Your measured quality delta on extraction fields
+
+## Troubleshooting: vLLM AWQ `cudaErrorUnsupportedPtxVersion`
+If vLLM crashes while loading an AWQ model with an error like:
+- `cudaErrorUnsupportedPtxVersion`
+- `the provided PTX was compiled with an unsupported toolchain`
+
+This usually means your **host NVIDIA driver** is not compatible with the CUDA/toolchain used by the kernels inside your vLLM container, or the selected kernel backend (e.g. **Marlin**) is not supported on that GPU generation.
+
+Practical fixes:
+- Prefer a host with a **newer NVIDIA driver** (often the simplest on marketplaces like Vast.ai).
+- Avoid using an unpinned base image (don’t rely on `:latest`). Pin the serving image to a known-good vLLM/CUDA combo for your target fleet.
+- If you must stay on that host, try a different quantization format/backend that doesn’t route through the failing kernel path.

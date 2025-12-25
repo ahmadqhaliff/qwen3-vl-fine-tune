@@ -1,4 +1,5 @@
-FROM vllm/vllm-openai:latest
+ARG VLLM_BASE_IMAGE=vllm/vllm-openai:latest
+FROM ${VLLM_BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \

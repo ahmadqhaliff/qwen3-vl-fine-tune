@@ -24,6 +24,12 @@ Fix:
 - Entrypoint: `runpod/serve/start.sh`
 - Server: `vllm.entrypoints.openai.api_server`
 
+### Pin your vLLM base image (avoid `:latest` drift)
+`runpod/serve/Dockerfile` supports a build arg:
+- `VLLM_BASE_IMAGE` (default: `vllm/vllm-openai:latest`)
+
+On heterogeneous providers (marketplaces, self-managed hosts), using `:latest` can produce CUDA/driver mismatches that surface as errors like `cudaErrorUnsupportedPtxVersion`.
+
 ## Adapter options
 Provide one of:
 - `LORA_DIR`: path to a mounted adapter folder (contains `adapter_model.safetensors` + `adapter_config.json`)

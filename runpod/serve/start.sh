@@ -87,4 +87,31 @@ if [[ -n "$VLLM_EXTRA_ARGS" ]]; then
   ARGS+=("${EXTRA_ARGS[@]}")
 fi
 
+if command -v nvidia-smi >/dev/null 2>&1; then
+  GPU_LINE="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$GPU_LINE" ]]; then
+    echo "[serve] GPU/driver: ${GPU_LINE}"
+  fi
+fi
+
+python3 - <<'PY'
+import os
+
+try:
+    import torch
+    torch_v = torch.__version__
+    cuda_v = torch.version.cuda
+except Exception:
+    torch_v = "<unknown>"
+    cuda_v = "<unknown>"
+
+try:
+    import vllm
+    vllm_v = getattr(vllm, "__version__", "<unknown>")
+except Exception:
+    vllm_v = "<unknown>"
+
+print(f"[serve] torch={torch_v} torch_cuda={cuda_v} vllm={vllm_v}")
+PY
+
 python3 -m vllm.entrypoints.openai.api_server "${ARGS[@]}"
