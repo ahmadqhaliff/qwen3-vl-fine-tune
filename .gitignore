@@ -19,3 +19,12 @@ __pycache__/
 /data/splits/
 /data/sft/
 *.jsonl
+
+*.tgz
+
+# Large artifacts / secrets
+*.tgz
+*.zip
+id_ed25519
+id_ed25519.pub
+

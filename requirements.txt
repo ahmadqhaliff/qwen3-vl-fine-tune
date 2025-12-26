@@ -1,5 +1,15 @@
-# Lightweight (data-prep only)
-# Keep this minimal; training/serving stacks will be added later.
+# Core: training + merge + quantize
+torch
+transformers
+peft
+accelerate
+datasets
+safetensors
+pillow
+tqdm
 
-# Optional: uncomment if you want JSON Schema validation (stronger than the built-in checks)
+# QLoRA base loading (load_in_4bit=True)
+bitsandbytes>=0.46.1
+
+# Optional: JSON Schema validation (stronger than the built-in checks)
 # jsonschema>=4.23.0

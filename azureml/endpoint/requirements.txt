@@ -1,6 +1,0 @@
-# Serving deps (pin once we confirm model + GPU)
-# vLLM is the preferred fast path; multimodal support depends on version/model.
-
-vllm
-fastapi
-uvicorn
