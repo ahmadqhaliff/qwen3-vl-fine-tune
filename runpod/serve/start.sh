@@ -23,34 +23,68 @@ ADAPTER_TGZ_PATH="${ADAPTER_TGZ_PATH:-}"
 ADAPTER_URL="${ADAPTER_URL:-}"
 ADAPTER_SHA256="${ADAPTER_SHA256:-}"
 
+# Adapter cache settings (helps avoid re-downloading on container restarts).
+ADAPTER_CACHE_DIR="${ADAPTER_CACHE_DIR:-/app/adapter}"
+ADAPTER_CACHE_TGZ_PATH="${ADAPTER_CACHE_TGZ_PATH:-${ADAPTER_CACHE_DIR}/adapter.tgz}"
+ADAPTER_CACHE_MARKER="${ADAPTER_CACHE_MARKER:-${ADAPTER_CACHE_DIR}/.adapter_extracted.sha256}"
+
+pick_lora_dir() {
+  if [[ -d "${ADAPTER_CACHE_DIR}/qwen3vl-8b-qlora" ]]; then
+    echo "${ADAPTER_CACHE_DIR}/qwen3vl-8b-qlora"
+  elif [[ -d "${ADAPTER_CACHE_DIR}/outputs/qwen3vl-8b-qlora" ]]; then
+    echo "${ADAPTER_CACHE_DIR}/outputs/qwen3vl-8b-qlora"
+  else
+    echo "${ADAPTER_CACHE_DIR}"
+  fi
+}
+
 if [[ -z "$LORA_DIR" ]]; then
   if [[ -n "$ADAPTER_TGZ_PATH" ]]; then
     echo "[serve] Using adapter tgz: ${ADAPTER_TGZ_PATH}"
-    mkdir -p /app/adapter
-    tar -xzf "$ADAPTER_TGZ_PATH" -C /app/adapter
-    # If tar contains outputs/qwen3vl-8b-qlora, prefer that.
-    if [[ -d /app/adapter/qwen3vl-8b-qlora ]]; then
-      LORA_DIR="/app/adapter/qwen3vl-8b-qlora"
-    elif [[ -d /app/adapter/outputs/qwen3vl-8b-qlora ]]; then
-      LORA_DIR="/app/adapter/outputs/qwen3vl-8b-qlora"
-    else
-      LORA_DIR="/app/adapter"
-    fi
+    mkdir -p "${ADAPTER_CACHE_DIR}"
+    cp -f "$ADAPTER_TGZ_PATH" "${ADAPTER_CACHE_TGZ_PATH}"
+    ADAPTER_URL=""
   elif [[ -n "$ADAPTER_URL" ]]; then
     echo "[serve] Downloading adapter from: ${ADAPTER_URL}"
-    mkdir -p /app/adapter
-    curl -L --retry 5 --retry-delay 2 -o /app/adapter/adapter.tgz "$ADAPTER_URL"
-    if [[ -n "$ADAPTER_SHA256" ]]; then
-      echo "${ADAPTER_SHA256}  /app/adapter/adapter.tgz" | sha256sum -c -
-    fi
-    tar -xzf /app/adapter/adapter.tgz -C /app/adapter
-    if [[ -d /app/adapter/qwen3vl-8b-qlora ]]; then
-      LORA_DIR="/app/adapter/qwen3vl-8b-qlora"
-    elif [[ -d /app/adapter/outputs/qwen3vl-8b-qlora ]]; then
-      LORA_DIR="/app/adapter/outputs/qwen3vl-8b-qlora"
+    mkdir -p "${ADAPTER_CACHE_DIR}"
+    if [[ -f "${ADAPTER_CACHE_TGZ_PATH}" ]]; then
+      echo "[serve] Reusing cached adapter tgz: ${ADAPTER_CACHE_TGZ_PATH}"
     else
-      LORA_DIR="/app/adapter"
+      curl -L --retry 5 --retry-delay 2 -o "${ADAPTER_CACHE_TGZ_PATH}" "$ADAPTER_URL"
     fi
+  fi
+
+  if [[ -z "$LORA_DIR" ]] && [[ -f "${ADAPTER_CACHE_TGZ_PATH}" ]]; then
+    ACTUAL_SHA256=""
+    if command -v sha256sum >/dev/null 2>&1; then
+      ACTUAL_SHA256="$(sha256sum "${ADAPTER_CACHE_TGZ_PATH}" | awk '{print $1}')"
+    fi
+
+    if [[ -n "$ADAPTER_SHA256" ]]; then
+      echo "${ADAPTER_SHA256}  ${ADAPTER_CACHE_TGZ_PATH}" | sha256sum -c -
+      ACTUAL_SHA256="$ADAPTER_SHA256"
+    fi
+
+    SHOULD_EXTRACT=1
+    if [[ -n "$ACTUAL_SHA256" ]] && [[ -f "$ADAPTER_CACHE_MARKER" ]]; then
+      MARKER_SHA="$(cat "$ADAPTER_CACHE_MARKER" 2>/dev/null || true)"
+      if [[ "$MARKER_SHA" == "$ACTUAL_SHA256" ]]; then
+        SHOULD_EXTRACT=0
+      fi
+    fi
+
+    if [[ $SHOULD_EXTRACT -eq 1 ]]; then
+      echo "[serve] Extracting adapter tgz into: ${ADAPTER_CACHE_DIR}"
+      rm -rf "${ADAPTER_CACHE_DIR}/qwen3vl-8b-qlora" "${ADAPTER_CACHE_DIR}/outputs/qwen3vl-8b-qlora" || true
+      tar -xzf "${ADAPTER_CACHE_TGZ_PATH}" -C "${ADAPTER_CACHE_DIR}"
+      if [[ -n "$ACTUAL_SHA256" ]]; then
+        echo -n "$ACTUAL_SHA256" > "$ADAPTER_CACHE_MARKER"
+      fi
+    else
+      echo "[serve] Adapter already extracted (sha256 match)."
+    fi
+
+    LORA_DIR="$(pick_lora_dir)"
   fi
 fi
 
@@ -114,4 +148,29 @@ except Exception:
 print(f"[serve] torch={torch_v} torch_cuda={cuda_v} vllm={vllm_v}")
 PY
 
-python3 -m vllm.entrypoints.openai.api_server "${ARGS[@]}"
+VLLM_LOG_PATH="${VLLM_LOG_PATH:-/tmp/vllm.log}"
+echo "[serve] vLLM log: ${VLLM_LOG_PATH}"
+
+set +e
+python3 -m vllm.entrypoints.openai.api_server "${ARGS[@]}" 2>&1 | tee "${VLLM_LOG_PATH}"
+STATUS=${PIPESTATUS[0]}
+set -e
+
+if [[ $STATUS -ne 0 ]]; then
+  if grep -qE "cudaErrorUnsupportedPtxVersion|unsupported toolchain" "${VLLM_LOG_PATH}" 2>/dev/null; then
+    cat <<'TXT'
+[serve] ERROR: vLLM failed with a CUDA PTX/toolchain incompatibility.
+[serve] This commonly happens when a kernel backend (often Marlin / CompressedTensors) was built
+[serve] with a CUDA toolchain that your host driver can't run.
+
+[serve] Practical fixes to try:
+[serve] - Pin a different vLLM base image (avoid :latest) that matches your host driver/CUDA.
+[serve] - Try a non-AWQ base model (FP16/BF16) or a different quant format (e.g., GPTQ) to avoid Marlin.
+[serve] - If you must use AWQ on this GPU/driver, rebuild vLLM from source in an image that targets your GPU.
+
+[serve] Tip: Mount a persistent volume to /app/adapter so the 615MB adapter isn't re-downloaded on restarts.
+TXT
+  fi
+fi
+
+exit $STATUS
